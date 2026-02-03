@@ -1,4 +1,4 @@
-name: Build_Lenovo_sm8750
+name: Build_Lenovo_SukiSU
 
 env:
   gz_branch: 'heads'
@@ -12,7 +12,6 @@ on:
         options:
           - '6.6.56'
           - '6.6.89'
-          - '6.6.116'
         default: '6.6.89'
 
       custom_kernel_suffix:
@@ -66,11 +65,7 @@ jobs:
               ;;
             6.6.89)
               echo "os_patch_level=2025-06" >> $GITHUB_ENV
-              echo "releases=TB322FC_1.1.11.263" >> $GITHUB_ENV
-              ;;
-            6.6.116)
-              echo "os_patch_level=lts" >> $GITHUB_ENV
-              echo "releases=TB322FC_1.1.11.263" >> $GITHUB_ENV
+              echo "releases=ColorOS_16_400_OPD_Boot" >> $GITHUB_ENV
               ;;
           esac
            if [ -z "${{ github.event.inputs.custom_kernel_suffix }}" ]; then
@@ -79,9 +74,6 @@ jobs:
                 echo 'DEFAULT_SUFFIX=-android15-8-g38447e018c92-ab12829524-4k' >> $GITHUB_ENV
                 ;;
               6.6.89)
-                echo 'DEFAULT_SUFFIX=-android15-8-g14220ae4ce65-ab13680582-4k' >> $GITHUB_ENV
-                ;;
-              6.6.116)
                 echo 'DEFAULT_SUFFIX=-android15-8-g14220ae4ce65-ab13680582-4k' >> $GITHUB_ENV
                 ;;
             esac
@@ -95,9 +87,6 @@ jobs:
                 echo 'KERNEL_TIME=Thu Dec 19 17:58:46 UTC 2024' >> $GITHUB_ENV
                 ;;
               6.6.89)
-                echo 'KERNEL_TIME=Mon Jun 23 07:30:57 UTC 2025' >> $GITHUB_ENV
-                ;;
-              6.6.116)
                 echo 'KERNEL_TIME=Mon Jun 23 07:30:57 UTC 2025' >> $GITHUB_ENV
                 ;;
             esac
@@ -158,10 +147,10 @@ jobs:
         id: ccache-restore
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-neov2-${{ env.sub_level }}-${{ runner.os }}-main
+          key: ccache-neov4-${{ env.sub_level }}-${{ runner.os }}-main
           restore-keys: |
-            ccache-neov2-${{ env.sub_level }}-${{ runner.os }}-
-            ccache-neov2-${{ env.sub_level }}-
+            ccache-neov4-${{ env.sub_level }}-${{ runner.os }}-
+            ccache-neov4-${{ env.sub_level }}-
       
       - name: 📥 Init ccache (初始化并配置ccache)
         run: |
