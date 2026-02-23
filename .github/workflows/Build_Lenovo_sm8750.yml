@@ -59,6 +59,11 @@ jobs:
           restore-keys: |
             ccache-sm8750-${{ github.event.inputs.kernel_version }}-
 
+      - name: Install ccache (Fix exit code 127)
+        run: |
+          sudo apt update -y
+          sudo apt install -y ccache
+
       - name: Initialize CCACHE
         run: |
           mkdir -p ${{ env.CCACHE_DIR }}
