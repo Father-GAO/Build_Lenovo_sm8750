@@ -1,319 +1,181 @@
-name: Build_Lenovo_sm8750
+name: Build_Ace5_Ultra_6.6.89_KPM
 
 on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: "请选择要集成的KSU: "
+        description: "Select KSU Type (Match Device)"
         required: true
         type: choice
         options:
-          - 'SukiSU'
           - 'ReSukiSU'
+          - 'SukiSU'
         default: 'ReSukiSU'
-      内核版本:
-        description: "请选择要编译的版本: "
-        required: true
-        type: choice
-        options:
-          - '6.6.56'
-          - '6.6.89'
-          - '6.6.102'
-        default: '6.6.89'
-      自定义内核后缀:
-        description: "⚡ 自定义内核名称（留空默认盲核名称）"
-        required: false
-        default: ''
-      自定义内核时间:
-        description: "📅 自定义构建时间（留空默认盲核时间）"
-        required: false
-        default: ''
-      enable_bbg:
-        description: "开启BBG基带守护"
-        required: false
-        default: false
-        type: boolean
       enable_kpm:
-        description: "开启KPM（修复检测失效）"
-        required: false
+        description: "Enable KPM (Fix Detection)"
+        required: true
         default: true
         type: boolean
-      启用签名:
-        description: "使用AOSP密钥签名引导加载程序"
+      custom_suffix:
+        description: "Custom Kernel Suffix (Optional)"
         required: false
-        default: true
-        type: boolean
+        default: 'KPM_Enabled'
 
 jobs:
-  构建:
-    name: Build_${{ github.event.inputs.内核版本 }}
+  build_kernel:
+    name: Build_6.6.89_KPM
     runs-on: ubuntu-latest
-    environment:
-      GZ分支: 'heads'
-      KSU_TYPE: ${{ github.event.inputs.ksu_type }}
-      KERNEL_VERSION: ${{ github.event.inputs.内核版本 }}
-      CUSTOM_KERNEL_SUFFIX: ${{ github.event.inputs.自定义内核后缀 }}
-      CUSTOM_KERNEL_TIME: ${{ github.event.inputs.自定义内核时间 }}
-      ENABLE_BBG: ${{ github.event.inputs.enable_bbg }}
-      ENABLE_KPM: ${{ github.event.inputs.enable_kpm }}
-      ENABLE_SIGNED: ${{ github.event.inputs.启用签名 }}
+    permissions:
+      contents: write
     env:
-      # 核心环境变量补全：KPM 补丁路径与内核版本映射
-      SUKISU_REPO: "https://github.com/SukiSU/SukiSU-Ultra.git"
+      # 核心适配：一加 Ace 5 至尊版（MT6991）内核源码
+      KERNEL_REPO: "https://github.com/ParticleG/android_kernel_oneplus_mt6991.git"
+      # ReSukiSU 官方仓库（匹配你设备当前环境）
       RESUKISU_REPO: "https://github.com/ReSukiSU/ReSukiSU.git"
+      SUKISU_REPO: "https://github.com/SukiSU/SukiSU-Ultra.git"
+      ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3.git"
+      # 固定内核版本：匹配你设备的 6.6.89
+      TARGET_KERNEL: "6.6.89"
       CCACHE_DIR: "${{ github.workspace }}/.ccache"
-      CCACHE_MAXSIZE: "50G"
+      CCACHE_MAXSIZE: "40G"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 📦 恢复ccache（加载当前内核版本的ccache缓存）
+      - name: Restore CCACHE Cache
         id: ccache-restore
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ env.KSU_TYPE }}-${{ env.KERNEL_VERSION }}-${{ runner.os }}-${{ github.sha }}
+          key: ccache-ace5ultra-${{ env.TARGET_KERNEL }}-${{ github.sha }}
           restore-keys: |
-            ccache-${{ env.KSU_TYPE }}-${{ env.KERNEL_VERSION }}-${{ runner.os }}-
-            ccache-${{ env.KSU_TYPE }}-${{ env.KERNEL_VERSION }}-
+            ccache-ace5ultra-${{ env.TARGET_KERNEL }}-
 
-      - name: ⚙️ 初始化并配置ccache
+      - name: Initialize CCACHE
         run: |
-          # 设置ccache环境变量
-          export CCACHE_COMPILERCHECK="none"
-          export CCACHE_BASEDIR="${{ github.workspace }}"
-          export CCACHE_NOHASHDIR="true"
-          export CCACHE_HARDLINK="true"
-          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
-          export CCACHE_MAXSIZE="${{ env.CCACHE_MAXSIZE }}"
-
-          # 确保ccache目录存在
-          mkdir -p "$CCACHE_DIR"
-
-          # 每次运行都重新配置缓存大小
-          echo "配置ccache缓存大小为: $CCACHE_MAXSIZE"
-          ccache -M "$CCACHE_MAXSIZE"
+          mkdir -p ${{ env.CCACHE_DIR }}
+          ccache -M ${{ env.CCACHE_MAXSIZE }}
           ccache -o compression=true
-
-          # 显示初始缓存状态
-          echo "ccache初始状态:"
           ccache -s
 
-          # 如果缓存恢复命中，显示详细信息
-          if [ "${{ steps.ccache-restore.outputs.cache-hit }}" = 'true' ]; then
-            echo "ccache缓存命中详情:"
-            ccache -sv
-          fi
-
-      - name: 🧩 安装环境依赖+初始化源码仓库及工具链
+      - name: Install Dependencies (MT6991 Build Env)
         run: |
-          rm -rf kernel_workspace
-          mkdir kernel_workspace
-          cd kernel_workspace
+          sudo apt update -y
+          sudo apt install -y git-core clang llvm lld gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi bc bison flex libssl-dev libelf-dev python3-pip
+          pip3 install pycryptodome
+          git config --global http.sslVerify false
 
-          sudo apt-mark hold firefox && \
-          sudo apt-mark hold libc-bin && \
-          sudo apt purge man-db && \
-          sudo rm -rf /var/lib/man-db/auto-update && \
-          sudo apt update && \
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3
-
-          echo "正在克隆源码仓库..."
-          aria2c -s16 -x16 -k1M "https://android.googlesource.com/kernel/common/+archive/${{ env.GZ分支 }}/arch.tar.gz" -o common.tar.gz
-          mkdir -p common && \
-          tar -xzf common.tar.gz -C common && \
-          rm -f common.tar.gz &
-
-          echo "正在克隆llvm-clang18工具链..."
-          mkdir -p clang18 && \
-          aria2c -s16 -x16 -k1M "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/clang18/clang18.zip" -o clang.zip && \
-          unzip -q clang.zip -d clang18 && \
-          rm -rf clang.zip &
-
-          echo "正在克隆构建工具..."
-          aria2c -s16 -x16 -k1M "https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/build-tools/build-tools.zip" -o build-tools.zip && \
-          unzip -q build-tools.zip && \
-          rm -rf build-tools.zip &
-
-          wait
-          echo "所有源码及llvm-Clang18工具链初始化完成！"
-
-          echo "正在去除 ABI 保护 & 去除 dirty 后缀..."
-          rm common/android/abi_gki_protected_exports* || true
-          # 如果 [[ "${{ env.KERNEL_VERSION }}" != "6.6.102" ]]; 则
-          if [ "${{ env.KERNEL_VERSION }}" != "6.6.102" ]; then
-            for f in common/scripts/setlocalversion; do
-              sed -i 's/-dirty//g' "$f"
-              sed -i '$i res=$(echo "$res" | sed '\''s/-dirty//g'\'')' "$f"
-            done
-          fi
-
-      - name: 📝 设置对应内核版本配置文件
+      - name: Clone Kernel Source (6.6.89 for MT6991)
         run: |
-          echo "KERNEL_TIME=${{ env.CUSTOM_KERNEL_TIME }}" >> $GITHUB_ENV
-          case "${{ env.KERNEL_VERSION }}" in
-            6.6.56)
-              echo "os_patch_level=2024-11" >> $GITHUB_ENV
-              echo "releases=TB322FC_1.1.11.120" >> $GITHUB_ENV
-              ;;
-            6.6.89)
-              echo "os_patch_level=2025-06" >> $GITHUB_ENV
-              echo "releases=ColorOS_16_400_OPD_Boot" >> $GITHUB_ENV
-              ;;
-            6.6.102)
-              echo "os_patch_level=2025-10" >> $GITHUB_ENV
-              echo "releases=TB322FC_1.5.10.096" >> $GITHUB_ENV
-              ;;
-          esac
+          git clone --depth=1 ${{ env.KERNEL_REPO }} kernel
+          cd kernel || exit 1
+          # 确认内核版本匹配
+          echo "Current kernel version: $(make kernelversion)"
 
-          if [ -z "${{ env.CUSTOM_KERNEL_SUFFIX }}" ]; then
-            case "${{ env.KERNEL_VERSION }}" in
-              6.6.56)
-                echo "DEFAULT_SUFFIX=-android15-8-g38447e018c92-ab12829524-4k" >> $GITHUB_ENV
-                ;;
-              6.6.89)
-                echo "DEFAULT_SUFFIX=-android15-8-g14220ae4ce65-ab13680582-4k" >> $GITHUB_ENV
-                ;;
-              6.6.102)
-                echo "DEFAULT_SUFFIX=-android15-8-g06bc416365ef-ab14559830-4k" >> $GITHUB_ENV
-                ;;
-            esac
-          else
-            echo "使用自定义名称: ${{ env.CUSTOM_KERNEL_SUFFIX }}"
-            echo "DEFAULT_SUFFIX=${{ env.CUSTOM_KERNEL_SUFFIX }}" >> $GITHUB_ENV
-          fi
-
-          if [ -z "${{ env.CUSTOM_KERNEL_TIME }}" ]; then
-            case "${{ env.KERNEL_VERSION }}" in
-              6.6.56)
-                echo "KERNEL_TIME=Thu Dec 19 17:58:46 UTC 2024" >> $GITHUB_ENV
-                ;;
-              6.6.89)
-                echo "KERNEL_TIME=Mon Jun 23 07:30:57 UTC 2025" >> $GITHUB_ENV
-                ;;
-              6.6.102)
-                echo "KERNEL_TIME=Tue Dec 9 15:43:22 UTC 2025" >> $GITHUB_ENV
-                ;;
-            esac
-          fi
-
-      - name: 🧩 集成 KSU 与 修复 KPM 核心补丁（关键步骤）
+      - name: Apply ReSukiSU + KPM Patches (Core Fix)
         run: |
-          cd kernel_workspace/common
-          export KERNEL_VERSION=${{ env.KERNEL_VERSION }}
-          export KSU_TYPE=${{ env.KSU_TYPE }}
-          export ENABLE_KPM=${{ env.ENABLE_KPM }}
+          cd kernel || exit 1
+          export KSU_TYPE=${{ github.event.inputs.ksu_type }}
+          export ENABLE_KPM=${{ github.event.inputs.enable_kpm }}
 
-          # 1. 克隆对应 KSU 仓库
-          if [ "$KSU_TYPE" = "SukiSU" ]; then
-            git clone --depth=1 ${{ env.SUKISU_REPO }} sukisu
-            PATCH_DIR="./sukisu/patches/$KERNEL_VERSION"
-          else
+          # 克隆对应 KSU 仓库（优先 ReSukiSU 匹配你设备）
+          if [ "$KSU_TYPE" = "ReSukiSU" ]; then
             git clone --depth=1 ${{ env.RESUKISU_REPO }} resukisu
-            PATCH_DIR="./resukisu/patches/$KERNEL_VERSION"
-          fi
-
-          # 2. 应用基础 KSU 补丁
-          if [ "$KSU_TYPE" = "SukiSU" ]; then
-            patch -p1 < "$PATCH_DIR/sukisu.patch"
-            # 适配 40129 补丁（匹配你当前管理器版本）
-            if [ -f "$PATCH_DIR/40129.patch" ]; then
-              patch -p1 < "$PATCH_DIR/40129.patch"
-            fi
+            PATCH_BASE="./resukisu/patches/${{ env.TARGET_KERNEL }}"
+            # 应用 ReSukiSU 基础补丁
+            patch -p1 < "$PATCH_BASE/resukisu.patch"
           else
-            patch -p1 < "$PATCH_DIR/resukisu.patch"
+            git clone --depth=1 ${{ env.SUKISU_REPO }} sukisu
+            PATCH_BASE="./sukisu/patches/${{ env.TARGET_KERNEL }}"
+            patch -p1 < "$PATCH_BASE/sukisu.patch"
+            # 适配你设备的 40276 管理器版本补丁
+            if [ -f "$PATCH_BASE/40276.patch" ]; then
+              patch -p1 < "$PATCH_BASE/40276.patch"
+            fi
           fi
 
-          # 3. 修复 KPM：条件应用 KPM 补丁 + 强制启用配置（核心修复）
+          # 强制启用 KPM（解决核心未配置问题）
           if [ "$ENABLE_KPM" = "true" ]; then
             # 应用 KPM 补丁
-            if [ "$KSU_TYPE" = "SukiSU" ]; then
-              KPM_PATCH="$PATCH_DIR/kpm.patch"
-            else
-              KPM_PATCH="$PATCH_DIR/kpm.patch"
-            fi
-
+            KPM_PATCH="$PATCH_BASE/kpm.patch"
             if [ -f "$KPM_PATCH" ]; then
               patch -p1 < "$KPM_PATCH"
-              echo "✅ 成功应用 $KSU_TYPE KPM 补丁"
+              echo "✅ Applied KPM patch for ${{ env.TARGET_KERNEL }}"
             else
-              echo "⚠️  当前内核版本 $KERNEL_VERSION 无对应 KPM 补丁，跳过"
-              exit 0
+              echo "❌ KPM patch not found for ${{ env.TARGET_KERNEL }}, exit!"
+              exit 1
             fi
 
-            # 强制启用 KPM 内核配置（解决检测失效）
+            # 关键修复：强制写入 KPM 配置与版本标识
             export ARCH=arm64
-            make lenovo_sm8750_defconfig
-            # 硬启用 CONFIG_KPM，覆盖配置文件默认值
+            # 加载一加 Ace 5 至尊版官方配置
+            make oneplus_ace5_ultra_b_defconfig
+            # 硬启用 CONFIG_KPM，覆盖所有默认值
             scripts/config --enable CONFIG_KPM
-            # 写入 KPM 版本宏，让管理器能识别（彻底解决判断失效）
-            echo "#define KPM_VERSION \"1.0.0\"" >> include/linux/kpm.h
+            scripts/config --set-str KPM_VERSION "1.0.0"
+            # 写入头文件，确保管理器能识别
+            echo "#ifndef KPM_VERSION_H" > include/linux/kpm_version.h
+            echo "#define KPM_VERSION \"1.0.0\"" >> include/linux/kpm_version.h
+            echo "#endif" >> include/linux/kpm_version.h
             # 保存配置
             make savedefconfig
-            echo "✅ 成功强制启用 KPM 配置并写入版本标识"
+            echo "✅ KPM config forced enabled"
           fi
 
-      - name: 🚀 编译内核（保留原有编译逻辑）
+      - name: Compile Kernel (MT6991 / 6.6.89)
         run: |
-          cd kernel_workspace/common
+          cd kernel || exit 1
           export ARCH=arm64
-          export PATH="${{ github.workspace }}/kernel_workspace/clang18/bin:${{ github.workspace }}/kernel_workspace/build-tools/bin:$PATH"
-          export CC=clang
-          export CXX=clang++
-          export LD=lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
+          export CROSS_COMPILE=aarch64-linux-gnu-
           export LLVM=1
           export LLVM_IAS=1
-
-          # 启用 ccache 加速编译
           export CCACHE_PREFIX=ccache
-
-          # 编译内核
+          # 多核编译，生成核心镜像
           make -j$(nproc) Image.gz dtbo.img
-          echo "✅ 内核编译完成"
+          # 验证编译产物
+          ls -lh arch/arm64/boot/Image.gz arch/arm64/boot/dtbo.img
 
-      - name: 📦 打包内核（适配 AnyKernel3）
+      - name: Package with AnyKernel3 (Flashable Zip)
         run: |
-          cd ${{ github.workspace }}
           mkdir -p AnyKernel3
-          cp kernel_workspace/common/arch/arm64/boot/Image.gz AnyKernel3/
-          cp kernel_workspace/common/arch/arm64/boot/dtbo.img AnyKernel3/
-
-          # 克隆 AnyKernel3 模板
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3-Template
+          # 复制编译产物
+          cp kernel/arch/arm64/boot/Image.gz AnyKernel3/
+          cp kernel/arch/arm64/boot/dtbo.img AnyKernel3/
+          # 克隆打包模板
+          git clone --depth=1 ${{ env.ANYKERNEL_REPO }} AnyKernel3-Template
           cp -r AnyKernel3-Template/* AnyKernel3/
           rm -rf AnyKernel3-Template
 
-          # 生成刷入脚本
-          echo "ui_print(\"Flashing ${{ env.KSU_TYPE }} + KPM (Fixed) for Lenovo sm8750...\");" > AnyKernel3/META-INF/com/google/android/updater-script
-          echo "package_extract_file(\"Image.gz\", \"/dev/block/bootdevice/by-name/boot\");" >> AnyKernel3/META-INF/com/google/android/updater-script
-          echo "package_extract_file(\"dtbo.img\", \"/dev/block/bootdevice/by-name/dtbo\");" >> AnyKernel3/META-INF/com/google/android/updater-script
-          echo "ui_print(\"Flashed successfully! KPM enabled.\");" >> AnyKernel3/META-INF/com/google/android/updater-script
+          # 生成适配一加 Ace 5 至尊版的刷入脚本
+          cat > AnyKernel3/META-INF/com/google/android/updater-script << EOF
+ui_print("=== Flashing Ace5 Ultra KPM Kernel ===");
+ui_print("Kernel Version: ${{ env.TARGET_KERNEL }}");
+ui_print("KSU Type: ${{ github.event.inputs.ksu_type }}");
+ui_print("KPM Status: Enabled");
+package_extract_file("Image.gz", "/dev/block/bootdevice/by-name/boot");
+package_extract_file("dtbo.img", "/dev/block/bootdevice/by-name/dtbo");
+ui_print("=== Flash Success! Reboot to take effect ===");
+EOF
 
-          # 命名打包文件
-          SUFFIX=${{ env.DEFAULT_SUFFIX }}
-          if [ -z "$SUFFIX" ]; then
-            SUFFIX="KPM_Fixed_${{ env.KSU_TYPE }}_${{ env.KERNEL_VERSION }}"
-          fi
-          zip -r9 Lenovo_sm8750_${SUFFIX}-${{ github.run_id }}.zip AnyKernel3/ -x "*.git*" "*.md" "LICENSE"
-          echo "✅ 内核打包完成：Lenovo_sm8750_${SUFFIX}-${{ github.run_id }}.zip"
+          # 命名打包文件（含设备标识）
+          SUFFIX=${{ github.event.inputs.custom_suffix }}
+          ZIP_NAME="OnePlus_Ace5_Ultra_${{ env.TARGET_KERNEL }}_${{ github.event.inputs.ksu_type }}_KPM_${SUFFIX}.zip"
+          cd AnyKernel3 && zip -r9 ../$ZIP_NAME . -x "*.git*" "*.md" "LICENSE"
+          cd .. && ls -lh $ZIP_NAME
 
-      - name: 📤 上传编译产物
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Lenovo_sm8750_Kernel_${{ env.KSU_TYPE }}_${{ env.KERNEL_VERSION }}
-          path: Lenovo_sm8750_*.zip
+          name: OnePlus_Ace5_Ultra_KPM_Kernel
+          path: OnePlus_Ace5_Ultra_*.zip
           retention-days: 7
 
-      - name: 💾 保存ccache缓存
-        uses: actions/cache/save@v4
+      - name: Save CCACHE Cache
         if: always()
+        uses: actions/cache/save@v4
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
