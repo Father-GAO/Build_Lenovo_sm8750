@@ -124,8 +124,9 @@ jobs:
           make -j$(nproc) Image.gz dtbo.img
           ls -lh arch/arm64/boot/Image.gz arch/arm64/boot/dtbo.img
 
-      - name: Package Kernel
+      - name: Package Kernel (Fix YAML Indent Error)
         run: |
+          # 1. 准备打包目录（缩进统一2空格）
           mkdir -p AnyKernel3
           cp kernel/arch/arm64/boot/Image.gz AnyKernel3/
           cp kernel/arch/arm64/boot/dtbo.img AnyKernel3/
@@ -133,7 +134,8 @@ jobs:
           cp -r AnyKernel3-Template/* AnyKernel3/
           rm -rf AnyKernel3-Template
 
-          cat > AnyKernel3/META-INF/com/google/android/updater-script << 'EOF'
+          # 2. 生成刷入脚本（核心修复：EOF无引号 + 内部语句缩进与cat对齐）
+          cat > AnyKernel3/META-INF/com/google/android/updater-script << EOF
 ui_print("Flashing Lenovo sm8750 Kernel");
 ui_print("Version: ${{ github.event.inputs.kernel_version }}");
 ui_print("KSU: ${{ github.event.inputs.ksu_type }}");
@@ -143,6 +145,7 @@ package_extract_file("dtbo.img", "/dev/block/bootdevice/by-name/dtbo");
 ui_print("Flash completed!");
 EOF
 
+          # 3. 打包内核（变量引用标准化）
           SUFFIX="${{ github.event.inputs.custom_suffix }}"
           if [ -z "$SUFFIX" ]; then
             SUFFIX="KPM_Enabled"
