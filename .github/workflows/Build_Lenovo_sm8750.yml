@@ -82,16 +82,16 @@ jobs:
       - name: Apply KSU & KPM Patches
         run: |
           cd kernel || exit 1
-          export KSU_TYPE=${{ github.event.inputs.ksu_type }}
-          export ENABLE_KPM=${{ github.event.inputs.enable_kpm }}
-          export KERNEL_VER=${{ github.event.inputs.kernel_version }}
+          KSU_TYPE="${{ github.event.inputs.ksu_type }}"
+          ENABLE_KPM="${{ github.event.inputs.enable_kpm }}"
+          KERNEL_VER="${{ github.event.inputs.kernel_version }}"
 
           if [ "$KSU_TYPE" = "ReSukiSU" ]; then
-            git clone --depth=1 ${{ env.RESUKISU_REPO }} resukisu
+            git clone --depth=1 "$RESUKISU_REPO" resukisu
             PATCH_DIR="./resukisu/patches/$KERNEL_VER"
             patch -p1 < "$PATCH_DIR/resukisu.patch"
           else
-            git clone --depth=1 ${{ env.SUKISU_REPO }} sukisu
+            git clone --depth=1 "$SUKISU_REPO" sukisu
             PATCH_DIR="./sukisu/patches/$KERNEL_VER"
             patch -p1 < "$PATCH_DIR/sukisu.patch"
           fi
@@ -129,11 +129,11 @@ jobs:
           mkdir -p AnyKernel3
           cp kernel/arch/arm64/boot/Image.gz AnyKernel3/
           cp kernel/arch/arm64/boot/dtbo.img AnyKernel3/
-          git clone --depth=1 ${{ env.ANYKERNEL_REPO }} AnyKernel3-Template
+          git clone --depth=1 "$ANYKERNEL_REPO" AnyKernel3-Template
           cp -r AnyKernel3-Template/* AnyKernel3/
           rm -rf AnyKernel3-Template
 
-          cat > AnyKernel3/META-INF/com/google/android/updater-script << EOF
+          cat > AnyKernel3/META-INF/com/google/android/updater-script << 'EOF'
 ui_print("Flashing Lenovo sm8750 Kernel");
 ui_print("Version: ${{ github.event.inputs.kernel_version }}");
 ui_print("KSU: ${{ github.event.inputs.ksu_type }}");
@@ -143,13 +143,13 @@ package_extract_file("dtbo.img", "/dev/block/bootdevice/by-name/dtbo");
 ui_print("Flash completed!");
 EOF
 
-          SUFFIX=${{ github.event.inputs.custom_suffix }}
+          SUFFIX="${{ github.event.inputs.custom_suffix }}"
           if [ -z "$SUFFIX" ]; then
             SUFFIX="KPM_Enabled"
           fi
           ZIP_NAME="Lenovo_sm8750_${{ github.event.inputs.kernel_version }}_${{ github.event.inputs.ksu_type }}_${SUFFIX}.zip"
-          cd AnyKernel3 && zip -r9 ../$ZIP_NAME . -x "*.git*" "*.md" "LICENSE"
-          cd .. && ls -lh $ZIP_NAME
+          cd AnyKernel3 && zip -r9 "../$ZIP_NAME" . -x "*.git*" "*.md" "LICENSE"
+          cd .. && ls -lh "$ZIP_NAME"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
