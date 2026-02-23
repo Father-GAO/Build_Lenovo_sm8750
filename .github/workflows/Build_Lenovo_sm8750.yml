@@ -124,7 +124,7 @@ jobs:
           make -j$(nproc) Image.gz dtbo.img
           ls -lh arch/arm64/boot/Image.gz arch/arm64/boot/dtbo.img
 
-      - name: Package Kernel (Fixed Indent & EOF)
+      - name: Package Kernel (No More Indent Errors)
         run: |
           # 1. Prepare AnyKernel3 directory
           mkdir -p AnyKernel3
@@ -134,16 +134,15 @@ jobs:
           cp -r AnyKernel3-Template/* AnyKernel3/
           rm -rf AnyKernel3-Template
 
-          # 2. Generate updater-script (CORE FIX: EOF without quotes + aligned indent)
-          cat > AnyKernel3/META-INF/com/google/android/updater-script << EOF
-ui_print("Flashing Lenovo sm8750 Kernel");
-ui_print("Version: ${{ github.event.inputs.kernel_version }}");
-ui_print("KSU: ${{ github.event.inputs.ksu_type }}");
-ui_print("KPM: ${{ github.event.inputs.enable_kpm }}");
-package_extract_file("Image.gz", "/dev/block/bootdevice/by-name/boot");
-package_extract_file("dtbo.img", "/dev/block/bootdevice/by-name/dtbo");
-ui_print("Flash completed!");
-EOF
+          # 2. Generate updater-script using printf (NO EOF, NO INDENT ISSUES)
+          SCRIPT_FILE="AnyKernel3/META-INF/com/google/android/updater-script"
+          printf 'ui_print("Flashing Lenovo sm8750 Kernel");\n' > "$SCRIPT_FILE"
+          printf 'ui_print("Version: %s");\n' "${{ github.event.inputs.kernel_version }}" >> "$SCRIPT_FILE"
+          printf 'ui_print("KSU: %s");\n' "${{ github.event.inputs.ksu_type }}" >> "$SCRIPT_FILE"
+          printf 'ui_print("KPM: %s");\n' "${{ github.event.inputs.enable_kpm }}" >> "$SCRIPT_FILE"
+          printf 'package_extract_file("Image.gz", "/dev/block/bootdevice/by-name/boot");\n' >> "$SCRIPT_FILE"
+          printf 'package_extract_file("dtbo.img", "/dev/block/bootdevice/by-name/dtbo");\n' >> "$SCRIPT_FILE"
+          printf 'ui_print("Flash completed!");\n' >> "$SCRIPT_FILE"
 
           # 3. Package final zip
           SUFFIX="${{ github.event.inputs.custom_suffix }}"
