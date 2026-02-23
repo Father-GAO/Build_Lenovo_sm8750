@@ -1,41 +1,46 @@
-name: Build_Ace5_Ultra_6.6.89_KPM
+name: Build_Lenovo_sm8750
 
 on:
   workflow_dispatch:
     inputs:
       ksu_type:
-        description: "Select KSU Type (Match Device)"
+        description: "Select KSU Type"
         required: true
         type: choice
         options:
           - 'ReSukiSU'
           - 'SukiSU'
         default: 'ReSukiSU'
+      kernel_version:
+        description: "Select Kernel Version"
+        required: true
+        type: choice
+        options:
+          - '6.6.56'
+          - '6.6.89'
+          - '6.6.102'
+        default: '6.6.89'
+      custom_suffix:
+        description: "Custom Kernel Suffix"
+        required: false
+        default: ''
       enable_kpm:
         description: "Enable KPM (Fix Detection)"
         required: true
         default: true
         type: boolean
-      custom_suffix:
-        description: "Custom Kernel Suffix (Optional)"
-        required: false
-        default: 'KPM_Enabled'
 
 jobs:
   build_kernel:
-    name: Build_6.6.89_KPM
+    name: Build_${{ github.event.inputs.kernel_version }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      # 核心适配：一加 Ace 5 至尊版（MT6991）内核源码
-      KERNEL_REPO: "https://github.com/ParticleG/android_kernel_oneplus_mt6991.git"
-      # ReSukiSU 官方仓库（匹配你设备当前环境）
+      KERNEL_REPO: "https://github.com/ParticleG/android_kernel_lenovo_sm8750.git"
       RESUKISU_REPO: "https://github.com/ReSukiSU/ReSukiSU.git"
       SUKISU_REPO: "https://github.com/SukiSU/SukiSU-Ultra.git"
       ANYKERNEL_REPO: "https://github.com/osm0sis/AnyKernel3.git"
-      # 固定内核版本：匹配你设备的 6.6.89
-      TARGET_KERNEL: "6.6.89"
       CCACHE_DIR: "${{ github.workspace }}/.ccache"
       CCACHE_MAXSIZE: "40G"
 
@@ -50,9 +55,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-ace5ultra-${{ env.TARGET_KERNEL }}-${{ github.sha }}
+          key: ccache-sm8750-${{ github.event.inputs.kernel_version }}-${{ github.sha }}
           restore-keys: |
-            ccache-ace5ultra-${{ env.TARGET_KERNEL }}-
+            ccache-sm8750-${{ github.event.inputs.kernel_version }}-
 
       - name: Initialize CCACHE
         run: |
@@ -61,71 +66,54 @@ jobs:
           ccache -o compression=true
           ccache -s
 
-      - name: Install Dependencies (MT6991 Build Env)
+      - name: Install Dependencies
         run: |
           sudo apt update -y
           sudo apt install -y git-core clang llvm lld gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi bc bison flex libssl-dev libelf-dev python3-pip
           pip3 install pycryptodome
           git config --global http.sslVerify false
 
-      - name: Clone Kernel Source (6.6.89 for MT6991)
+      - name: Clone Kernel Source
         run: |
           git clone --depth=1 ${{ env.KERNEL_REPO }} kernel
           cd kernel || exit 1
-          # 确认内核版本匹配
-          echo "Current kernel version: $(make kernelversion)"
+          echo "Kernel version: $(make kernelversion)"
 
-      - name: Apply ReSukiSU + KPM Patches (Core Fix)
+      - name: Apply KSU & KPM Patches
         run: |
           cd kernel || exit 1
           export KSU_TYPE=${{ github.event.inputs.ksu_type }}
           export ENABLE_KPM=${{ github.event.inputs.enable_kpm }}
+          export KERNEL_VER=${{ github.event.inputs.kernel_version }}
 
-          # 克隆对应 KSU 仓库（优先 ReSukiSU 匹配你设备）
           if [ "$KSU_TYPE" = "ReSukiSU" ]; then
             git clone --depth=1 ${{ env.RESUKISU_REPO }} resukisu
-            PATCH_BASE="./resukisu/patches/${{ env.TARGET_KERNEL }}"
-            # 应用 ReSukiSU 基础补丁
-            patch -p1 < "$PATCH_BASE/resukisu.patch"
+            PATCH_DIR="./resukisu/patches/$KERNEL_VER"
+            patch -p1 < "$PATCH_DIR/resukisu.patch"
           else
             git clone --depth=1 ${{ env.SUKISU_REPO }} sukisu
-            PATCH_BASE="./sukisu/patches/${{ env.TARGET_KERNEL }}"
-            patch -p1 < "$PATCH_BASE/sukisu.patch"
-            # 适配你设备的 40276 管理器版本补丁
-            if [ -f "$PATCH_BASE/40276.patch" ]; then
-              patch -p1 < "$PATCH_BASE/40276.patch"
-            fi
+            PATCH_DIR="./sukisu/patches/$KERNEL_VER"
+            patch -p1 < "$PATCH_DIR/sukisu.patch"
           fi
 
-          # 强制启用 KPM（解决核心未配置问题）
           if [ "$ENABLE_KPM" = "true" ]; then
-            # 应用 KPM 补丁
-            KPM_PATCH="$PATCH_BASE/kpm.patch"
-            if [ -f "$KPM_PATCH" ]; then
-              patch -p1 < "$KPM_PATCH"
-              echo "✅ Applied KPM patch for ${{ env.TARGET_KERNEL }}"
+            if [ -f "$PATCH_DIR/kpm.patch" ]; then
+              patch -p1 < "$PATCH_DIR/kpm.patch"
+              echo "✅ KPM patch applied"
             else
-              echo "❌ KPM patch not found for ${{ env.TARGET_KERNEL }}, exit!"
+              echo "❌ KPM patch not found for $KERNEL_VER"
               exit 1
             fi
 
-            # 关键修复：强制写入 KPM 配置与版本标识
             export ARCH=arm64
-            # 加载一加 Ace 5 至尊版官方配置
-            make oneplus_ace5_ultra_b_defconfig
-            # 硬启用 CONFIG_KPM，覆盖所有默认值
+            make lenovo_sm8750_defconfig
             scripts/config --enable CONFIG_KPM
             scripts/config --set-str KPM_VERSION "1.0.0"
-            # 写入头文件，确保管理器能识别
-            echo "#ifndef KPM_VERSION_H" > include/linux/kpm_version.h
-            echo "#define KPM_VERSION \"1.0.0\"" >> include/linux/kpm_version.h
-            echo "#endif" >> include/linux/kpm_version.h
-            # 保存配置
+            echo "#define KPM_VERSION \"1.0.0\"" > include/linux/kpm_version.h
             make savedefconfig
-            echo "✅ KPM config forced enabled"
           fi
 
-      - name: Compile Kernel (MT6991 / 6.6.89)
+      - name: Compile Kernel
         run: |
           cd kernel || exit 1
           export ARCH=arm64
@@ -133,44 +121,41 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           export CCACHE_PREFIX=ccache
-          # 多核编译，生成核心镜像
           make -j$(nproc) Image.gz dtbo.img
-          # 验证编译产物
           ls -lh arch/arm64/boot/Image.gz arch/arm64/boot/dtbo.img
 
-      - name: Package with AnyKernel3 (Flashable Zip)
+      - name: Package Kernel
         run: |
           mkdir -p AnyKernel3
-          # 复制编译产物
           cp kernel/arch/arm64/boot/Image.gz AnyKernel3/
           cp kernel/arch/arm64/boot/dtbo.img AnyKernel3/
-          # 克隆打包模板
           git clone --depth=1 ${{ env.ANYKERNEL_REPO }} AnyKernel3-Template
           cp -r AnyKernel3-Template/* AnyKernel3/
           rm -rf AnyKernel3-Template
 
-          # 生成适配一加 Ace 5 至尊版的刷入脚本
           cat > AnyKernel3/META-INF/com/google/android/updater-script << EOF
-ui_print("=== Flashing Ace5 Ultra KPM Kernel ===");
-ui_print("Kernel Version: ${{ env.TARGET_KERNEL }}");
-ui_print("KSU Type: ${{ github.event.inputs.ksu_type }}");
-ui_print("KPM Status: Enabled");
+ui_print("Flashing Lenovo sm8750 Kernel");
+ui_print("Version: ${{ github.event.inputs.kernel_version }}");
+ui_print("KSU: ${{ github.event.inputs.ksu_type }}");
+ui_print("KPM: ${{ github.event.inputs.enable_kpm }}");
 package_extract_file("Image.gz", "/dev/block/bootdevice/by-name/boot");
 package_extract_file("dtbo.img", "/dev/block/bootdevice/by-name/dtbo");
-ui_print("=== Flash Success! Reboot to take effect ===");
+ui_print("Flash completed!");
 EOF
 
-          # 命名打包文件（含设备标识）
           SUFFIX=${{ github.event.inputs.custom_suffix }}
-          ZIP_NAME="OnePlus_Ace5_Ultra_${{ env.TARGET_KERNEL }}_${{ github.event.inputs.ksu_type }}_KPM_${SUFFIX}.zip"
+          if [ -z "$SUFFIX" ]; then
+            SUFFIX="KPM_Enabled"
+          fi
+          ZIP_NAME="Lenovo_sm8750_${{ github.event.inputs.kernel_version }}_${{ github.event.inputs.ksu_type }}_${SUFFIX}.zip"
           cd AnyKernel3 && zip -r9 ../$ZIP_NAME . -x "*.git*" "*.md" "LICENSE"
           cd .. && ls -lh $ZIP_NAME
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus_Ace5_Ultra_KPM_Kernel
-          path: OnePlus_Ace5_Ultra_*.zip
+          name: Lenovo_sm8750_Kernel
+          path: Lenovo_sm8750_*.zip
           retention-days: 7
 
       - name: Save CCACHE Cache
